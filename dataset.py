@@ -22,6 +22,12 @@ class Dataset(ABC):
     def generate_batches(self, batch_size, shuffle=False):
         # Yield one batch from the dataset
         m = len(self)
+
+        # We want the ability to have an empty dataset,
+        # for output tensors which require no input
+        if m == 0:
+            return
+
         indices = np.arange(m)
         if shuffle:
             np.random.shuffle(indices)
@@ -80,6 +86,16 @@ class DatasetPtr(Dataset):
 
     def __len__(self):
         return len(self.indices)
+
+
+class EmptyDataset(Dataset):
+    """Dataset with no features,
+    runs for only a single batch"""
+    def __getitem__(self, index):
+        return {}
+
+    def __len__(self):
+        return 1
 
 
 class DictionaryDataset(Dataset):
@@ -144,6 +160,10 @@ def concatenate_batch_dictionaries(batch_dictionaries, single_examples=False):
     a feature name
     single_examples - decides whether to concatenate (for batches) or to stack (for single vectors)"""
     result = {}
+
+    # If no features, return None
+    # if len(batch_dictionaries) == 0:
+    #     return None
 
     for key in batch_dictionaries[0]:
         if single_examples or len(batch_dictionaries[0][key].shape) == 0:

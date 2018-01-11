@@ -82,11 +82,11 @@ class GenericModel(ABC):
 
     def _create_standard_placeholders(self):
         """"""
-        self.inputs['is training'] = tf.placeholder_with_default(False, (), name='is_training')
+        self.inputs['is_training'] = tf.placeholder_with_default(False, (), name='is_training')
 
     def _fill_standard_placeholders(self, is_training):
         # Must at least return empty dictionary.
-        return {'is training': is_training}
+        return {'is_training': is_training}
 
     def _initialize_loss(self):
         """If user specifies loss to train on (using self.loss), create an Adam optimizer to minimize that loss,
@@ -134,6 +134,9 @@ class GenericModel(ABC):
 
         if verbose and is_training:
             print('Training...')
+
+        if dataset is None:
+            dataset = arcadian.dataset.EmptyDataset()
 
         # Allow user to give dictionaries of numpy features as input!
         if isinstance(dataset, dict):
