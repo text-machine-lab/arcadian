@@ -9,8 +9,8 @@ class SimpleModel(GenericModel):
         self.trainable = False
         tf_input = tf.placeholder(tf.float32, shape=(None, 1), name='x')
         tf_output = tf_input + 3.0
-        self.inputs['x'] = tf_input
-        self.outputs['y'] = tf_output
+        self.i['x'] = tf_input
+        self.o['y'] = tf_output
 
     def action_per_epoch(self, output_tensor_dict, epoch_index, is_training, **kwargs):
         print('Executing action_per_epoch')
@@ -30,15 +30,15 @@ class LessSimpleModel(GenericModel):
         tf_input = tf.placeholder(tf.float32, shape=(None, 1), name='x')
         tf_w = tf.get_variable('w', (1, 1), initializer=tf.contrib.layers.xavier_initializer())
         tf_output = tf_input + tf_w
-        self.inputs['x'] = tf_input
-        self.outputs['y'] = tf_output
-        self.outputs['w'] = tf_w
+        self.i['x'] = tf_input
+        self.o['y'] = tf_output
+        self.o['w'] = tf_w
 
         tf_label = tf.placeholder(tf.float32, shape=(None, 1), name='label')
-        tf_loss = tf.nn.l2_loss(tf_label - self.outputs['y'])
+        tf_loss = tf.nn.l2_loss(tf_label - self.o['y'])
         train_op = tf.train.AdamOptimizer(.001).minimize(tf_loss)
-        self.inputs['label'] = tf_label
-        self.outputs['loss'] = tf_loss
+        self.i['label'] = tf_label
+        self.o['loss'] = tf_loss
         self.train_ops['l2_loss'] = train_op
 
     def action_before_training(self, placeholder_dict, num_epochs, is_training, output_tensor_names=None,
@@ -54,13 +54,13 @@ class EvenLessSimpleModel(GenericModel):
         tf_input = tf.placeholder(tf.float32, shape=(None, 1), name='x')
         tf_w = tf.get_variable('w', (1, 1), initializer=tf.contrib.layers.xavier_initializer())
         tf_output = tf_input + tf_w
-        self.inputs['x'] = tf_input
-        self.outputs['y'] = tf_output
-        self.outputs['w'] = tf_w
+        self.i['x'] = tf_input
+        self.o['y'] = tf_output
+        self.o['w'] = tf_w
 
         tf_label = tf.placeholder(tf.float32, shape=(None, 1), name='label')
-        self.loss = tf.nn.l2_loss(tf_label - self.outputs['y'])
-        self.inputs['label'] = tf_label
+        self.loss = tf.nn.l2_loss(tf_label - self.o['y'])
+        self.i['label'] = tf_label
 
     def action_before_training(self, placeholder_dict, num_epochs, is_training, output_tensor_names=None,
                                batch_size=32, train_op_names=None, **kwargs):

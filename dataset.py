@@ -39,11 +39,20 @@ class Dataset(ABC):
                 break
 
             batch_data = [self[each_index] for each_index in index_batch]
+
+            # if len(batch_data) > 32:
+            #     print('batch_data > 32!')
+            #     print('batch_size: %s' % batch_size)
+            #     print('num_batches: %s' % num_batches)
+            #     print('Dataset len: %s' % len(self))
+            #     print('Num indices: %s' % len(indices))
+
             # result = {}
             # for key in batch_data[0]:
             #     result[key] = np.stack([d[key] for d in batch_data], axis=0)
 
             yield concatenate_batch_dictionaries(batch_data, single_examples=True)
+
 
     def split(self, fraction, seed=None, max_examples=None):
         """Split dataset into two subset datasets. 'fraction' argument decides
@@ -139,9 +148,14 @@ class MergeDataset(Dataset):
         Arguments:
             - datasets: list of Dataset objects, all with the same length
         """
-        self.datasets = datasets
-        self.length = len(datasets[0])
-        for each_dataset in datasets:
+        self.datasets = datasets.copy()
+
+        for index in range(len(self.datasets)):
+            if isinstance(self.datasets[index], dict):
+                self.datasets[index] = DictionaryDataset(self.datasets[index])
+
+        self.length = len(self.datasets[0])
+        for each_dataset in self.datasets:
             assert len(each_dataset) == self.length
 
     def __getitem__(self, index):

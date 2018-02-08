@@ -144,7 +144,7 @@ class GenericModelTest(unittest2.TestCase):
 
             dataset = DictionaryDataset({'x': np.array([[3]]), 'label': np.array([[6]])})
 
-            output_dict = lsm.train(dataset, output_tensor_names=['w'], num_epochs=10000, verbose=False)
+            output_dict = lsm.train(dataset, outputs=['w'], num_epochs=10000, verbose=False)
             epsilon = .01
             assert np.abs(3 - output_dict['w']) < epsilon
             print(output_dict)
@@ -162,7 +162,7 @@ class GenericModelTest(unittest2.TestCase):
 
             dataset = DictionaryDataset({'x': np.array([[3]]), 'label': np.array([[6]])})
 
-            output_dict = lsm.train(dataset, output_tensor_names=['w'], num_epochs=10000, verbose=False)
+            output_dict = lsm.train(dataset, outputs=['w'], num_epochs=10000, verbose=False)
             epsilon = .1
             assert np.abs(3 - output_dict['w']) < epsilon
             assert output_dict['loss'] < epsilon

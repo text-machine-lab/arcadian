@@ -1,4 +1,5 @@
-"""David Donahue November 2017. This is a generic parent class for Tensorflow models. This file should be stand-alone."""
+"""David Donahue November 2017. This is a generic parent class for Tensorflow models. Simply subclass
+from the GenericModel class, and define your model using override build() function."""
 import time
 from abc import ABC, abstractmethod
 import os
@@ -9,7 +10,7 @@ import numpy as np
 
 
 class GenericModel(ABC):
-    def __init__(self, save_dir=None, tensorboard_name=None, restore_from_save=False, trainable=True, tf_log_level='2'):
+    def __init__(self, save_dir=None, tensorboard_name=None, restore=False, trainable=True, tf_log_level='2'):
         """Abstract class which contains support functionality for developing Tensorflow models.
         Derive subclasses from this class and override the build() method. Define entire model in this method,
         and add all placeholders to self.input_placeholders dictionary as name:placeholder pairs. Add all tensors
@@ -26,16 +27,16 @@ class GenericModel(ABC):
         Arguments:
             save_dir: directory with which to save your model checkpoint files to
             tensorboard_name: directory name in /tmp/ where Tensorboard graph will be saved
-            restore_from_save: indicates whether to restore model from save
+            restore: indicates whether to restore model from save
             trainable: decide whether model will be trainable
             tf_log_level: by default, disables all outputs from Tensorflow backend (except errors)
         """
-        assert not restore_from_save or trainable  # don't restore un-trainable model
-        assert not restore_from_save or save_dir is not None  # can only restore if there is a save directory
+        assert not restore or trainable  # don't restore un-trainable model
+        assert not restore or save_dir is not None  # can only restore if there is a save directory
 
         self.save_per_epoch = (save_dir is not None and trainable)
         self.shuffle = True
-        self.restore_from_save = restore_from_save
+        self.restore = restore
 
         # Make sure there is slash after save directory. Important!
         if save_dir is not None and not save_dir.endswith('/'):
@@ -47,18 +48,22 @@ class GenericModel(ABC):
         if save_dir is not None and not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
-        # Use Just-In-Time Compilation
+        # Use Just-In-Time Compilation, don't take up all of GPU!
         self.config = tf.ConfigProto()
-        self.config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+        self.config.gpu_options.allow_growth = True
+        # self.config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
         self.graph = tf.Graph()
         with self.graph.as_default():
             self.trainable = trainable
             self.tensorboard_name = tensorboard_name
             self.load_scopes = []
-            self.inputs = {}
-            self.outputs = {}
-            self.train_ops = []
+
+            # inputs and outputs to model, defining its interface.
+            self.i = {}
+            self.o = {}
+
+            self.train_ops = []  # order to execute ops on a batch - if empty we are in prediction mode
             self.loss = None
             self._create_standard_placeholders()
 
@@ -74,7 +79,7 @@ class GenericModel(ABC):
                 self.saver = tf.train.Saver(var_list=tf.trainable_variables(), max_to_keep=10)
             else:
                 self.saver = None
-            if self.save_dir is not None and self.restore_from_save:
+            if self.save_dir is not None and self.restore:
                 for each_scope in self.load_scopes:
                     load_scope_from_save(self.save_dir, self.sess, each_scope)
                 if len(self.load_scopes) == 0:
@@ -82,7 +87,7 @@ class GenericModel(ABC):
 
     def _create_standard_placeholders(self):
         """"""
-        self.inputs['is_training'] = tf.placeholder_with_default(False, (), name='is_training')
+        self.i['is_training'] = tf.placeholder_with_default(False, (), name='is_training')
 
     def _fill_standard_placeholders(self, is_training):
         # Must at least return empty dictionary.
@@ -96,19 +101,19 @@ class GenericModel(ABC):
         if self.loss is not None:
             learning_rate = tf.placeholder_with_default(.001, shape=(), name='learning_rate')
             self.train_ops.append(tf.train.AdamOptimizer(learning_rate).minimize(self.loss))
-            self.inputs['learning rate'] = learning_rate
-            self.outputs['loss'] = self.loss
+            self.i['learning rate'] = learning_rate
+            self.o['loss'] = self.loss
 
     @abstractmethod
     def build(self):
         """Implement Tensorflow model and specify model placeholders and output tensors you wish to evaluate
-        using self.input_placeholders and self.output_tensors dictionaries. Specify each entry as a name:tensor pair.
+        using self.inputs and self.output_s dictionaries. Specify each entry as a name:tensor pair.
         Specify variable scopes to restore by adding to self.load_scopes list. Specify loss function to train on
         by assigning loss tensor to self.loss variable. Read initialize_loss() documentation for adaptive
         learning rates and evaluating loss tensor at runtime."""
         pass
 
-    def action_per_epoch(self, output_tensor_dict, epoch_index, is_training, parameter_dict, **kwargs):
+    def action_per_epoch(self, output_tensor_dict, epoch_index, is_training, params, **kwargs):
         """Optional: Define action to take place at the end of every epoch. Can use this
         for printing accuracy, saving statistics, etc. Remember, if is_training=False, we are using the model for
         prediction. Check for this. Returns true to continue training. Only return false if you wish to
@@ -116,36 +121,55 @@ class GenericModel(ABC):
         return True
 
     def action_per_batch(self, input_batch_dict, output_batch_dict, epoch_index, batch_index, is_training,
-                         parameter_dict, **kwargs):
+                         params, **kwargs):
         """Optional: Define action to take place at the end of every batch. Can use this
         for printing accuracy, saving statistics, etc. Remember, if is_training=False, we are using the model for
         prediction. Check for this."""
         pass
 
     def action_before_training(self, placeholder_dict, num_epochs, is_training, output_tensor_names,
-                               parameter_dict, batch_size=32, **kwargs):
+                               params, batch_size=32, **kwargs):
         """Optional: Define action to take place at the beginning of training/prediction, once. This could be
         used to set output_tensor_names so that certain ops always execute, as needed for other action functions."""
         pass
 
-    def _eval(self, dataset, num_epochs, parameter_dict=None, output_tensor_names=None, batch_size=32, is_training=True, verbose=True, **kwargs):
+    def _eval(self, dataset, num_epochs, params=None, outputs=None, batch_size=32, is_training=True, verbose=True, **kwargs):
         """Evaluate output tensors of model with dataset as input. Optionally train on that dataset. Return dictionary
-        of evaluated tensors to user. For internal use only, shared functionality between training and prediction."""
+        of evaluated tensors to user. For internal use only, shared functionality between training and prediction.
+
+        Arguments:
+            dataset - Dataset object containing features to use as input. Can also be dict of features or None for empty dataset
+            num_epochs - number of epochs to train model for. If is_training=False, the model still won't train
+            params - provide input features that do not vary across batches, i.e. hyper parameters
+            output_tensor_names - a list of names of tensors to evaluate. These names must appear in self.o
+            batch_size - batch size to use when training or predicting (default:32)
+            is_training - specify whether to train or predict (execute optimizers or not)
+            verbose - allow the model to output evaluation progress
+            kwargs - parameters passable into evaluation for use in overridden user action functions
+
+        Returns: A dictionary containing evaluated output tensors by name in self.o
+            """
+
+        if num_epochs == 0:
+            raise ValueError('Cannot train for zero epochs.')
 
         if verbose and is_training:
             print('Training...')
 
+        # Allow user to provide no dataset as input
         if dataset is None:
             dataset = arcadian.dataset.EmptyDataset()
-
         # Allow user to give dictionaries of numpy features as input!
         if isinstance(dataset, dict):
             dataset = arcadian.dataset.DictionaryDataset(dataset)
+        # Allow user to give a list of datasets
+        if isinstance(dataset, list):
+            dataset = arcadian.dataset.MergeDataset(dataset)
 
         # Join parameters and default parameters into one dictionary
-        united_parameter_dict = self._fill_standard_placeholders(is_training)
-        if parameter_dict is not None:
-            united_parameter_dict.update(parameter_dict)
+        united_params = self._fill_standard_placeholders(is_training)
+        if params is not None:
+            united_params.update(params)
 
         # Only train if model is trainable
         if is_training and not self.trainable:
@@ -153,10 +177,10 @@ class GenericModel(ABC):
 
         # If user doesn't specify output tensors, evaluate them all!
         # Note: train() function doesn't allow output_tensor_names=None for simplicity
-        if output_tensor_names is None:
-            output_tensor_names = [name for name in self.outputs]
+        if outputs is None:
+            outputs = [name for name in self.o]
 
-        self.action_before_training(dataset, num_epochs, is_training, output_tensor_names, parameter_dict,
+        self.action_before_training(dataset, num_epochs, is_training, outputs, params,
                                     batch_size=batch_size, **kwargs)
 
         # Control what train ops are executed via arguments
@@ -167,29 +191,32 @@ class GenericModel(ABC):
 
         # Loss should always be evaluated during training if it exists
         if self.loss is not None and is_training:
-            if 'loss' not in output_tensor_names:
-                output_tensor_names.append('loss')
+            if 'loss' not in outputs:
+                outputs.append('loss')
 
         # Create list of output tensors, initialize output dictionaries
-        output_tensors = [self.outputs[each_tensor_name] for each_tensor_name in output_tensor_names]
+        output_tensors = [self.o[each_tensor_name] for each_tensor_name in outputs]
         all_output_batch_dicts = None
 
         # Create feed dictionary for model parameters
-        parameter_feed_dict = {self.inputs[feature_name]: united_parameter_dict[feature_name]
-                               for feature_name in united_parameter_dict}
+        parameter_feed_dict = {self.i[feature_name]: united_params[feature_name]
+                               for feature_name in united_params}
 
         continue_training = True
         do_shuffle = self.shuffle and is_training
 
-        def optional_tqdm(iterable, verbose=True):
+        def optional_tqdm(iterable, max_its=None, verbose=True):
             """Function to disable tqdm output if verbose is disabled."""
             if verbose:
-                for element in tqdm(iterable):
+                for element in tqdm(iterable, total=max_its):
                     yield element
             else:
                 for element in iterable:
                     yield element
 
+        output_dict_concat = None
+
+        num_batches = len(dataset) // batch_size + 1
 
         with self.graph.as_default():
             # Evaluate and/or train on dataset. Run user-defined action functions
@@ -201,9 +228,16 @@ class GenericModel(ABC):
 
                 all_output_batch_dicts = []
                 for batch_index, batch_dict in optional_tqdm(enumerate(dataset.generate_batches(batch_size=batch_size, shuffle=do_shuffle)),
+                                                             max_its=num_batches,
                                                              verbose=(verbose and is_training)):
+
+                    # batch_size = batch_dict[0].shape[0]
+                    # if batch_size > 100:
+                    #     print('Batch_size: %s' % batch_size)
+                    #     print('Batch index: %s' % batch_index)
+
                     # Run batch in session - combine dataset features and parameters
-                    feed_dict = {self.inputs[feature_name]: batch_dict[feature_name]
+                    feed_dict = {self.i[feature_name]: batch_dict[feature_name]
                                  for feature_name in batch_dict}
                     feed_dict.update(parameter_feed_dict)
 
@@ -215,10 +249,10 @@ class GenericModel(ABC):
                     for each_op in train_op_list:
                         output_numpy_arrays, _ = self.sess.run([output_tensors, each_op], feed_dict)
 
-                    input_batch_dict = {feature_name: feed_dict[self.inputs[feature_name]]
+                    input_batch_dict = {feature_name: feed_dict[self.i[feature_name]]
                                         for feature_name in batch_dict}
-                    output_batch_dict = {output_tensor_names[index]: output_numpy_arrays[index]
-                                         for index in range(len(output_tensor_names))}
+                    output_batch_dict = {outputs[index]: output_numpy_arrays[index]
+                                         for index in range(len(outputs))}
 
                     # Save evaluated tensors only for last optimizer run
 
@@ -226,10 +260,10 @@ class GenericModel(ABC):
                     all_output_batch_dicts.append(output_batch_dict)
 
                     self.action_per_batch(input_batch_dict, output_batch_dict, epoch_index,
-                                          batch_index, is_training, parameter_dict, **kwargs)
+                                          batch_index, is_training, params, **kwargs)
 
                 if self.save_per_epoch and self.trainable and is_training:
-                    self.saver.save(self.sess, self.save_dir, global_step=epoch_index)
+                    self.saver.save(self.sess, self.save_dir, global_step=epoch_index, write_meta_graph=False)
 
                 epoch_end_time = time.time()
 
@@ -241,16 +275,22 @@ class GenericModel(ABC):
 
                 # Call user action per epoch, and allow them to stop training early
                 continue_training = self.action_per_epoch(output_dict_concat, epoch_index, is_training,
-                                                          parameter_dict, **kwargs)
+                                                          params, **kwargs)
                 if not continue_training:
                     break
 
-        return output_dict_concat
+        # If the output dict only has one feature, just return that feature.
+        # Otherwise, return dictionary of features
+        if len(output_dict_concat) == 1:
+            key = list(output_dict_concat.keys())[0]
+            return output_dict_concat[key]
+        else:
+            return output_dict_concat
 
-    def train(self, dataset, output_tensor_names=None, num_epochs=5, **kwargs):
+    def train(self, dataset, outputs=None, num_epochs=5, **kwargs):
         """Train on a dataset. Can specify which output tensors to evaluate (or none at all if dataset is too large).
         Can specify batch size and provide parameters arguments as inputs to model placeholders. To add constant
-        values for input placeholders, pass to parameter_dict a dictionary containing name:value pairs. Name must
+        values for input placeholders, pass to params a dictionary containing name:value pairs. Name must
         match internal name of desired placeholder as defined in self.input_placeholders dictionary. Can set number
         of epochs to train for. **kwargs can be used to provide additional arguments to internal action functions,
         which can be overloaded for extra functionality. Training examples are shuffled each epoch!
@@ -259,41 +299,43 @@ class GenericModel(ABC):
             dataset - subclass object of Dataset class containing labelled input features. Can also be dictionary
             output_tensor_names - list of names of output tensors to evaluate. Names defined in build() function
             num_epochs - number of epochs to train on. Is possible to implement early stopping using action functions
-            parameter_dict - dictionary of constant parameters to provide to model (like learning rates)
+            params - dictionary of constant parameters to provide to model (like learning rates)
             batch_size - number of examples to train on at once
-            kwargs - optional parameters sent to action functions for expanded functionality
 
-        Returns: dictionary of evaluated output tensors.
+        Can specify optional parameters sent to action functions for expanded functionality.
+
+        Returns: Dictionary of evaluated output tensors.
         """
         # For training: if user doesn't specify output tensors to evaluate, don't evaluate any.
         # If user wishes to evaluate all tensors, try output_tensor_names=(model).outputs
-        if output_tensor_names is None:
-            output_tensor_names = []
+        if outputs is None:
+            outputs = []
 
         output_tensor_dict = self._eval(dataset, num_epochs,
-                                        output_tensor_names=output_tensor_names,
+                                        outputs=outputs,
                                         is_training=True,
                                         **kwargs)
 
         return output_tensor_dict
 
-    def predict(self, dataset, output_tensor_names=None, **kwargs):
+    def predict(self, dataset, outputs=None, **kwargs):
         """Predict on a dataset. Can specify which output tensors to evaluate. Can specify batch size and provide
         parameters arguments as inputs to model placeholders. To add constant values for input placeholders, pass to
-        parameter_dict a dictionary containing name:value pairs. Name must match internal name of desired placeholder
+        params a dictionary containing name:value pairs. Name must match internal name of desired placeholder
         as defined in self.input_placeholders dictionary. **kwargs can be used to provide additional arguments to
         internal action functions, which can be overloaded for extra functionality.
 
         Arguments:
             dataset - subclass object of Dataset class containing labelled input features. Can also be dictionary
             output_tensor_names - list of names of output tensors to evaluate. Names defined in build() function
-            parameter_dict - dictionary of constant parameters to provide to model (like learning rates)
+            params - dictionary of constant parameters to provide to model (like learning rates)
             batch_size - number of examples to train on at once
-            kwargs - optional parameters sent to action functions for expanded functionality
+
+        Can specify optional parameters sent to action functions for expanded functionality
 
         Returns: dictionary of evaluated output tensors."""
         output_tensor_dict = self._eval(dataset, 1,
-                                        output_tensor_names=output_tensor_names,
+                                        outputs=outputs,
                                         train_op_names=[],
                                         is_training=False,
                                         **kwargs)
@@ -302,7 +344,8 @@ class GenericModel(ABC):
 
 
 def create_tensorboard_visualization(model_name):
-    """Saves the Tensorflow graph of your model, so you can view it in a TensorBoard console."""
+    """Saves the Tensorflow graph of your model, so you can view it in a TensorBoard console.
+    Saves to the /tmp folder."""
     writer = tf.summary.FileWriter("/tmp/" + model_name + "/")
     writer.add_graph(tf.get_default_graph())
     return writer
@@ -326,7 +369,8 @@ def load_scope_from_save(save_dir, sess, scope):
     """Load the encoder model variables from checkpoint in save_dir.
     Store them in session sess."""
     variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
-    assert len(variables) > 0
+    if not len(variables) > 0:
+        raise AssertionError('Load scope %s must contain trainable variables!' % str(scope))
     restore_model_from_save(save_dir, sess, var_list=variables)
 
 
