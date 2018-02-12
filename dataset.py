@@ -40,16 +40,16 @@ class Dataset(ABC):
 
             batch_data = [self[each_index] for each_index in index_batch]
 
-            # if len(batch_data) > 32:
-            #     print('batch_data > 32!')
-            #     print('batch_size: %s' % batch_size)
-            #     print('num_batches: %s' % num_batches)
-            #     print('Dataset len: %s' % len(self))
-            #     print('Num indices: %s' % len(indices))
+            if len(batch_data) > 32:
+                print('batch_data > 32!')
+                print('batch_size: %s' % batch_size)
+                print('num_batches: %s' % num_batches)
+                print('Dataset len: %s' % len(self))
+                print('Num indices: %s' % len(indices))
 
-            # result = {}
-            # for key in batch_data[0]:
-            #     result[key] = np.stack([d[key] for d in batch_data], axis=0)
+            result = {}
+            for key in batch_data[0]:
+                result[key] = np.stack([d[key] for d in batch_data], axis=0)
 
             yield concatenate_batch_dictionaries(batch_data, single_examples=True)
 
