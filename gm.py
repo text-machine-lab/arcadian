@@ -224,17 +224,13 @@ class GenericModel(ABC):
                 if not continue_training:
                     break
 
-                epoch_start_time = time.time()
+                if is_training and verbose:
+                    print('Epoch %s' % epoch_index)
 
                 all_output_batch_dicts = []
                 for batch_index, batch_dict in optional_tqdm(enumerate(dataset.generate_batches(batch_size=batch_size, shuffle=do_shuffle)),
                                                              max_its=num_batches,
                                                              verbose=(verbose and is_training)):
-
-                    # batch_size = batch_dict[0].shape[0]
-                    # if batch_size > 100:
-                    #     print('Batch_size: %s' % batch_size)
-                    #     print('Batch index: %s' % batch_index)
 
                     # Run batch in session - combine dataset features and parameters
                     feed_dict = {self.i[feature_name]: batch_dict[feature_name]
@@ -246,8 +242,12 @@ class GenericModel(ABC):
 
                     # Execute all optimizers in order
                     output_numpy_arrays = None
-                    for each_op in train_op_list:
-                        output_numpy_arrays, _ = self.sess.run([output_tensors, each_op], feed_dict)
+
+                    train_op_index = batch_index % len(train_op_list)
+
+                    each_op = train_op_list[train_op_index]
+
+                    output_numpy_arrays, _ = self.sess.run([output_tensors, each_op], feed_dict)
 
                     input_batch_dict = {feature_name: feed_dict[self.i[feature_name]]
                                         for feature_name in batch_dict}
@@ -265,13 +265,12 @@ class GenericModel(ABC):
                 if self.save_per_epoch and self.trainable and is_training:
                     self.saver.save(self.sess, self.save_dir, global_step=epoch_index, write_meta_graph=False)
 
-                epoch_end_time = time.time()
-
-                if is_training and verbose:
-                    print('Epoch %s Elapsed Time: %s' % (epoch_index, epoch_end_time - epoch_start_time))
-
                 # Calculate output dictionary from last epoch executed
                 output_dict_concat = arcadian.dataset.concatenate_batch_dictionaries(all_output_batch_dicts)
+
+                if is_training and self.loss is not None and verbose:
+                    avg_loss = np.mean(output_dict_concat['loss'])
+                    print('Loss: %s' % avg_loss)
 
                 # Call user action per epoch, and allow them to stop training early
                 continue_training = self.action_per_epoch(output_dict_concat, epoch_index, is_training,
