@@ -12,6 +12,8 @@ class Dataset(ABC):
     @abstractmethod
     def __getitem__(self, index):
         # Get a single item as an index from the dataset.
+        # {'feature1': np_array1, 'feature2': np_array2}
+        # {'history': np_array1, 'response': np_array2}
         pass
 
     @abstractmethod
@@ -146,7 +148,7 @@ class DictionaryDataset(Dataset):
         return self.batch_feature_dict
 
 class MergeDataset(Dataset):
-    def __init__(self, datasets):
+    def __init__(self, datasets, concat_duplicates=False):
         """Dataset intended to merge the features of multiple datasets.
 
         Arguments:
@@ -158,14 +160,39 @@ class MergeDataset(Dataset):
             if isinstance(self.datasets[index], dict):
                 self.datasets[index] = DictionaryDataset(self.datasets[index])
 
+        # Get all keys
+        self.keys = []
+        for dataset in self.datasets:
+            for feature in dataset[0]:
+                if feature not in self.keys:
+                    self.keys.append(feature)
+
+        # Create mapping from keys (features) to datasets that contain them
+        self.has_duplicates = False
+        self.feat2data = {}
+        for feature in self.keys:
+            self.feat2data[feature] = [dataset for dataset in self.datasets if feature in dataset[0]]
+            if len(self.feat2data[feature]) == 1:
+                self.feat2data[feature] = self.feat2data[feature][0]  # only one item in list, remove list wrapper
+            else:
+                self.has_duplicates = True
+
+        assert not self.has_duplicates or concat_duplicates
+
         self.length = len(self.datasets[0])
         for each_dataset in self.datasets:
             assert len(each_dataset) == self.length
 
     def __getitem__(self, index):
         output_dict = {}
-        for each_dataset in self.datasets:
-            output_dict.update(each_dataset[index])
+        for feature in self.feat2data:
+            data = self.feat2data[feature]  # datasets having this key (feature name)
+            if isinstance(data, Dataset):
+                output_dict[feature] = data[index][feature]
+            else:
+                # it is a list of datasets, we concatenate everything along the feature axis
+                output_dict[feature] = np.concatenate([d[index][feature] for d in data], axis=0)
+
         return output_dict
 
     def __len__(self):

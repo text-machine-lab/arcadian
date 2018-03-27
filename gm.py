@@ -3,7 +3,7 @@ from the GenericModel class, and define your model using override build() functi
 import time
 from abc import ABC, abstractmethod
 import os
-import tensorflow as tf
+import tensorflow as T
 import arcadian.dataset
 from tqdm import tqdm
 import numpy as np
@@ -49,11 +49,11 @@ class GenericModel(ABC):
             os.makedirs(self.save_dir)
 
         # Use Just-In-Time Compilation, don't take up all of GPU!
-        self.config = tf.ConfigProto()
+        self.config = T.ConfigProto()
         self.config.gpu_options.allow_growth = True
         # self.config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
-        self.graph = tf.Graph()
+        self.graph = T.Graph()
         with self.graph.as_default():
             self.trainable = trainable
             self.tensorboard_name = tensorboard_name
@@ -72,11 +72,11 @@ class GenericModel(ABC):
             os.environ['TF_CPP_MIN_LOG_LEVEL'] = tf_log_level
             if self.tensorboard_name is not None:
                 create_tensorboard_visualization(self.tensorboard_name)
-            self.init = tf.global_variables_initializer()
-            self.sess = tf.InteractiveSession(config=self.config)
+            self.init = T.global_variables_initializer()
+            self.sess = T.InteractiveSession(config=self.config)
             self.sess.run(self.init)
             if self.trainable:
-                self.saver = tf.train.Saver(var_list=tf.trainable_variables(), max_to_keep=10)
+                self.saver = T.train.Saver(var_list=T.trainable_variables(), max_to_keep=100)
             else:
                 self.saver = None
             if self.save_dir is not None and self.restore:
@@ -87,7 +87,7 @@ class GenericModel(ABC):
 
     def _create_standard_placeholders(self):
         """"""
-        self.i['is_training'] = tf.placeholder_with_default(False, (), name='is_training')
+        self.i['is_training'] = T.placeholder_with_default(False, (), name='is_training')
 
     def _fill_standard_placeholders(self, is_training):
         # Must at least return empty dictionary.
@@ -99,8 +99,8 @@ class GenericModel(ABC):
         for learning rate and add it to input placeholders under name 'learning rate'. Add loss tensor
         to output tensor dictionary under name 'loss', so it can be evaluated during training."""
         if self.loss is not None:
-            learning_rate = tf.placeholder_with_default(.001, shape=(), name='learning_rate')
-            self.train_ops.append(tf.train.AdamOptimizer(learning_rate).minimize(self.loss))
+            learning_rate = T.placeholder_with_default(.001, shape=(), name='learning_rate')
+            self.train_ops.append(T.train.AdamOptimizer(learning_rate).minimize(self.loss))
             self.i['learning rate'] = learning_rate
             self.o['loss'] = self.loss
 
@@ -151,10 +151,10 @@ class GenericModel(ABC):
             """
 
         if num_epochs == 0:
-            raise ValueError('Cannot train for zero epochs.')
+            return None
 
         if verbose and is_training:
-            print('Training...')
+            print('GM: Training...')
 
         # Allow user to provide no dataset as input
         if dataset is None:
@@ -173,7 +173,7 @@ class GenericModel(ABC):
 
         # Only train if model is trainable
         if is_training and not self.trainable:
-            raise ValueError('Cannot train while model is not trainable.')
+            raise ValueError('GM: Cannot train while model is not trainable.')
 
         # If user doesn't specify output tensors, evaluate them all!
         # Note: train() function doesn't allow output_tensor_names=None for simplicity
@@ -196,7 +196,6 @@ class GenericModel(ABC):
 
         # Create list of output tensors, initialize output dictionaries
         output_tensors = [self.o[each_tensor_name] for each_tensor_name in outputs]
-        all_output_batch_dicts = None
 
         # Create feed dictionary for model parameters
         parameter_feed_dict = {self.i[feature_name]: united_params[feature_name]
@@ -345,18 +344,18 @@ class GenericModel(ABC):
 def create_tensorboard_visualization(model_name):
     """Saves the Tensorflow graph of your model, so you can view it in a TensorBoard console.
     Saves to the /tmp folder."""
-    writer = tf.summary.FileWriter("/tmp/" + model_name + "/")
-    writer.add_graph(tf.get_default_graph())
+    writer = T.summary.FileWriter("/tmp/" + model_name + "/")
+    writer.add_graph(T.get_default_graph())
     return writer
 
 
 def restore_model_from_save(model_var_dir, sess, var_list=None):
     """Restores all model variables from the specified directory."""
     if var_list is None:
-        var_list = tf.trainable_variables()
-    saver = tf.train.Saver(max_to_keep=10, var_list=var_list)
+        var_list = T.trainable_variables()
+    saver = T.train.Saver(max_to_keep=10, var_list=var_list)
     # Restore model from previous save.
-    ckpt = tf.train.get_checkpoint_state(model_var_dir)
+    ckpt = T.train.get_checkpoint_state(model_var_dir)
     if ckpt and ckpt.model_checkpoint_path:
         saver.restore(sess, ckpt.model_checkpoint_path)
     else:
@@ -367,7 +366,7 @@ def restore_model_from_save(model_var_dir, sess, var_list=None):
 def load_scope_from_save(save_dir, sess, scope):
     """Load the encoder model variables from checkpoint in save_dir.
     Store them in session sess."""
-    variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
+    variables = T.get_collection(T.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
     if not len(variables) > 0:
         raise AssertionError('Load scope %s must contain trainable variables!' % str(scope))
     restore_model_from_save(save_dir, sess, var_list=variables)
