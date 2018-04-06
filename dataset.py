@@ -60,11 +60,13 @@ class Dataset(ABC):
             yield concatenate_batch_dictionaries(batch_data, single_examples=True)
 
 
-    def split(self, fraction, seed=None, max_examples=None):
+    def split(self, fraction, seed='seed', max_examples=None):
         """Split dataset into two subset datasets. 'fraction' argument decides
         what fraction of the original dataset is used to make the first subset.
         The remaining examples are used to create the second subset. Typically
-        used for train/test splits.
+        used for train/test splits. By DEFAULT there is a seed, as randomly
+        splitting training and test sets on each run can leave training examples
+        in the validation set and ultimately a higher validation accuracy.
 
         Arguments:
             - fraction: fraction of examples in first subset
@@ -83,6 +85,41 @@ class Dataset(ABC):
         first_subset = DatasetPtr(self, dataset_indices[:subset_divider_index])
         second_subset = DatasetPtr(self, dataset_indices[subset_divider_index:])
         return first_subset, second_subset
+
+    def to_numpy(self, feature):
+        """Grab all examples of feature and concatenate them into a numpy array.
+
+        Returns: a numpy array"""
+        examples = []
+        for index in range(len(self)):
+            examples.append(self[index][feature])
+
+        return np.stack(examples, axis=0)
+
+
+
+class RenameDataset(Dataset):
+    def __init__(self, dataset, mappings):
+        """Takes features from dataset and renames
+        them.
+
+        mappings - dictionary with keys as
+        features in original dataset and values
+        as the renamed versions"""
+        self.dataset = dataset
+        self.mappings = mappings
+
+        # add remaining features back as pointing to themselves
+        features = dataset[0].keys()
+        for feature in features:
+            if feature not in mappings:
+                self.mappings[feature] = feature
+
+    def __getitem__(self, index):
+        return {self.mappings[feature]: self.dataset[index][feature] for feature in self.dataset[index]}
+
+    def __len__(self):
+        return len(self.dataset)
 
 
 class DatasetPtr(Dataset):
